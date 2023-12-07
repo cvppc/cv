@@ -1,0 +1,18 @@
+import cv2
+import numpy as np
+image = cv2.imread("cv.jpg")
+# cv2.imshow(image)
+image = cv2.resize(image, (480, 320))
+cv2.imwrite('img1.jpg', image)
+image_blurred = cv2.blur(src=image, ksize=(5, 5))
+image_blurred = cv2.resize(image_blurred, (480, 320))
+cv2.imwrite('img2.jpg', image_blurred)
+# cv2.imshow(image_blurred)
+# cv2.waitKey()
+# cv2.destroyAllWindows()
+image_blurred1 = cv2.blur(src=image, ksize=(75, 75))
+image_blurred1 = cv2.resize(image_blurred, (480, 320))
+cv2.imwrite('img3.jpg', image_blurred1)
+# cv2.imshow(image_blurred)
+# cv2.waitKey()
+# cv2.destroyAllWindows()
