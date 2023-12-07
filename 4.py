@@ -1,84 +1,50 @@
+import numpy as np
 import cv2
-import numpy as np 
-import glob
-from tqdm import tqdm
-import PIL.ExifTags
-import PIL.Image
-from matplotlib import pyplot as plt 
 
-def create_output(vertices, colors, filename):
-  colors = colors.reshape(-1,3)
-  vertices = np.hstack([vertices.reshape(-1,3),colors])
-  ply_header = '''ply
-    format ascii 1.0
-    element vertex %(vert_num)d
-    property float x
-    property float y
-    property float z
-    property uchar red
-    property uchar green
-    property uchar blue
-    end_header
-    '''
-  with open(filename, 'w') as f:
-    f.write(ply_header %dict(vert_num=len(vertices)))
-    np.savetxt(f,vertices,'%f %f %f %d %d %d')
+def get_background(file_path):
+    cap = cv2.VideoCapture(file_path)
+    frame_indices = cap.get(cv2.CAP_PROP_FRAME_COUNT) * np.random.uniform(size=50)
+    frames = []
+    for idx in frame_indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ret, frame = cap.read()
+        frames.append(frame)
+    median_frame = np.median(frames, axis=0).astype(np.uint8)
+    return median_frame 
 
-def downsample_image(image, reduce_factor):
-  for i in range(0,reduce_factor):
-    if len(image.shape) > 2:
-      row,col = image.shape[:2]
+cap = cv2.VideoCapture('input.mp4')
+background = get_background('nput.mp4')
+background = cv2.cvtColor(background, cv2.COLOR_BGR2GRAY)
+frame_count = 0
+consecutive_frame = 10
+
+while (cap.isOpened()):
+    ret, frame = cap.read()
+    if ret == True:
+        frame_count += 1
+        orig_frame = frame.copy()
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if frame_count % consecutive_frame == 0 or frame_count == 1:
+            frame_diff_list = []
+        frame_diff = cv2.absdiff(gray, background)
+        ret, thres = cv2.threshold(frame_diff, 50, 255, cv2.THRESH_BINARY)
+        dilate_frame = cv2.dilate(thres, None, iterations=2)
+        frame_diff_list.append(dilate_frame)
+        if len(frame_diff_list) == consecutive_frame:
+            sum_frames = sum(frame_diff_list)
+            contours, hierarchy = cv2.findContours(sum_frames, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for i, cnt in enumerate(contours):
+                cv2.drawContours(frame, contours, i, (0, 0, 255), 3)
+            for contour in contours:
+                if cv2.contourArea(contour) < 500:
+                    continue
+                (x, y, w, h) = cv2.boundingRect(contour)
+                cv2.rectangle(orig_frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            cv2.imshow("hi",orig_frame)
+            if cv2.waitKey(100) & 0xFF == ord('q'):
+                break
     else:
-      row,col = image.shape
-    image = cv2.pyrDown(image, dstsize= (col//2, row // 2))
-  return image
+        break
 
-ret = np.load('/content/ret.npy')
-K = np.load('/content/K.npy')
-dist = np.load('/content/dist.npy')
-img_path1 = '/content/left.png'
-img_path2 = '/content/right.png'
-img_1 = cv2.imread(img_path1)
-img_2 = cv2.imread(img_path2)
-h,w = img_2.shape[:2]
-new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(K,dist,(w,h),1,(w,h))
-img_1_undistorted = cv2.undistort(img_1, K, dist, None, new_camera_matrix)
-img_2_undistorted = cv2.undistort(img_2, K, dist, None, new_camera_matrix)
-img_1_downsampled = downsample_image(img_1_undistorted,3)
-img_2_downsampled = downsample_image(img_2_undistorted,3)
-win_size = 5
-min_disp = -1
-max_disp = 63 
-num_disp = max_disp - min_disp 
-stereo = cv2.StereoSGBM_create(minDisparity= min_disp,
-  numDisparities = num_disp,
-  blockSize = 5,
-  uniquenessRatio = 5,
-  speckleWindowSize = 5,
-  speckleRange = 5,
-  disp12MaxDiff = 2,
-  P1 = 8*3*win_size**2,
-  P2 =32*3*win_size**2) 
-print ("\nComputing the disparity  map...")
-disparity_map = stereo.compute(img_1_downsampled, img_2_downsampled)
-plt.imshow(disparity_map,'gray')
-plt.show()
-print ("\nGenerating the 3D map...")
-h,w = img_2_downsampled.shape[:2]
-focal_length = np.load('/content/FocalLength.npy')
-Q = np.float32([[1,0,0,-w/2.0],
-        [0,-1,0,h/2.0],
-        [0,0,0,-focal_length],
-        [0,0,1,0]])
-Q2 = np.float32([[1,0,0,0],
-        [0,-1,0,0],
-        [0,0,focal_length*0.05,0],
-        [0,0,0,1]])
-points_3D = cv2.reprojectImageTo3D(disparity_map, Q2)
-colors = cv2.cvtColor(img_1_downsampled, cv2.COLOR_BGR2RGB)
-mask_map = disparity_map > disparity_map.min()
-output_points = points_3D[mask_map]
-output_colors = colors[mask_map]
-output_file = 'reconstructed.ply'
-print ("\n Creating the output file... \n")
-create_output(output_points, output_colors, output_file)
+cap.release()
+cv2.destroyAllWindows()
